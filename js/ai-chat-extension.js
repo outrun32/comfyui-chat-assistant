@@ -143,7 +143,11 @@ class AIChatManager {
                     messages,
                     stream: !!onStreamChunk,
                     temperature: 0.7,
-                    max_tokens: 2048
+                    max_tokens: 2048,
+                    // Disable reasoning/thinking for all compatible providers:
+                    // OpenRouter uses `reasoning.exclude`, some vLLM builds use `include_reasoning`
+                    reasoning: { exclude: true },
+                    include_reasoning: false
                 })
             });
 
