@@ -144,9 +144,11 @@ class AIChatManager {
                     stream: !!onStreamChunk,
                     temperature: 0.7,
                     max_tokens: 2048,
-                    // Disable reasoning/thinking for all compatible providers:
-                    // OpenRouter uses `reasoning.exclude`, some vLLM builds use `include_reasoning`
-                    reasoning: { exclude: true },
+                    // Disable reasoning/thinking for all compatible providers.
+                    // `effort: "none"` fully disables it (OpenAI/Grok/compatible).
+                    // `exclude: true` hides it from response for models that still think internally.
+                    // `include_reasoning: false` is the legacy OpenRouter fallback.
+                    reasoning: { effort: "none", exclude: true },
                     include_reasoning: false
                 })
             });
