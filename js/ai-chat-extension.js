@@ -16,10 +16,8 @@ class AIChatManager {
         this.isExpanding = false;
         this.apiEndpoint = this.config.apiEndpoint;
         this.model = this.config.model;
-        this.backendType = this.config.backendType || 'ollama';
-        this.ollamaContext = this.loadOllamaContext();
+        this.apiKey = this.config.apiKey || '';
         this.promptLanguage = this.config.promptLanguage || 'en';
-        // Initialize system prompt based on language
         this.updateSystemPrompt();
     }
     
@@ -78,250 +76,87 @@ class AIChatManager {
     clearHistory() {
         this.chatHistory = [];
         this.saveChatHistory();
-        this.ollamaContext = null;
-        try {
-            localStorage.removeItem(this.config.storage.ollamaContext);
-        } catch (e) {}
     }
 
-    // Load/save Ollama context (for /api/generate)
-    loadOllamaContext() {
-        try {
-            const saved = localStorage.getItem(this.config.storage.ollamaContext);
-            return saved ? JSON.parse(saved) : null;
-        } catch (e) {
-            return null;
-        }
-    }
-
-    saveOllamaContext(context) {
-        this.ollamaContext = Array.isArray(context) ? context : null;
-        try {
-            if (this.ollamaContext) {
-                localStorage.setItem(this.config.storage.ollamaContext, JSON.stringify(this.ollamaContext));
-            } else {
-                localStorage.removeItem(this.config.storage.ollamaContext);
-            }
-        } catch (e) {}
-    }
-
-    // Build Ollama URL for a given path (e.g., /api/tags) based on configured endpoint
-    buildOllamaUrl(path) {
-        try {
-            const url = new URL(this.apiEndpoint, window.location.href);
-            return `${url.origin}${path}`;
-        } catch (e) {
-            if (this.apiEndpoint.includes('/api/generate')) {
-                return this.apiEndpoint.replace('/api/generate', path);
-            }
-            if (this.apiEndpoint.includes('/api/chat')) {
-                return this.apiEndpoint.replace('/api/chat', path);
-            }
-            // Default fallback
-            return (this.apiEndpoint.endsWith('/api') ? this.apiEndpoint : this.apiEndpoint.replace(/\/?$/, '/api')) + path.replace('/api', '');
-        }
-    }
-
-    // Fetch list of local models from backend (Ollama or vLLM)
+    // Fetch available models via OpenAI-compatible /v1/models
     async fetchLocalModels() {
         try {
-            if (this.backendType === 'vllm') {
-                // vLLM uses OpenAI-compatible /v1/models endpoint
-                let modelsUrl;
-                if (this.apiEndpoint.includes('/v1/')) {
-                    // Extract base URL and append /v1/models
-                    modelsUrl = this.apiEndpoint.replace(/\/v1\/.*$/, '/v1/models');
-                } else {
-                    // Fallback: assume standard vLLM port
-                    const url = new URL(this.apiEndpoint, window.location.href);
-                    modelsUrl = `${url.origin}/v1/models`;
-                }
-                console.log(`Fetching vLLM models from: ${modelsUrl}`);
-                const res = await fetch(modelsUrl, { method: 'GET' });
-                if (!res.ok) throw new Error(`Failed to load models: ${res.status}`);
-                const data = await res.json();
-                const models = Array.isArray(data.data) ? data.data : [];
-                const names = models.map(m => m.id || m.model || '').filter(Boolean);
-                console.log(`Found ${names.length} vLLM models:`, names);
-                return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
-            } else {
-                // Ollama backend
-                const tagsUrl = this.buildOllamaUrl('/api/tags');
-                console.log(`Fetching Ollama models from: ${tagsUrl}`);
-                const res = await fetch(tagsUrl, { method: 'GET' });
-                if (!res.ok) throw new Error(`Failed to load models: ${res.status}`);
-                const data = await res.json();
-                const models = Array.isArray(data.models) ? data.models : [];
-                // Prefer name field, fallback to model field
-                const names = models.map(m => (m && (m.name || m.model || '')).toString()).filter(Boolean);
-                console.log(`Found ${names.length} Ollama models:`, names);
-                // Unique + sort
-                return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
-            }
+            const modelsUrl = this.apiEndpoint.includes('/v1/')
+                ? this.apiEndpoint.replace(/\/v1\/.*$/, '/v1/models')
+                : (() => { const u = new URL(this.apiEndpoint, window.location.href); return `${u.origin}/v1/models`; })();
+            const headers = { 'Content-Type': 'application/json' };
+            if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+            const res = await fetch(modelsUrl, { method: 'GET', headers });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const names = (Array.isArray(data.data) ? data.data : [])
+                .map(m => m.id || m.model || '').filter(Boolean);
+            return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
         } catch (e) {
-            console.error(`Failed to fetch local models from ${this.backendType}:`, e);
+            console.error('Failed to fetch models:', e);
             return [];
         }
     }
 
-    // Send message to AI API (supports Ollama, vLLM with streaming)
+    // Send message via OpenAI-compatible chat completions API
     async sendToAI(message, isPromptExpansion = false, onStreamChunk = null, images = null) {
-        // Get system prompt based on current language setting
         this.updateSystemPrompt();
-        const systemPrompts = this.config.systemPrompts || this.config.chat?.systemPrompts || {};
+        const systemPrompts = this.config.systemPrompts || {};
         const systemPrompt = this.config.chat?.systemPrompt?.chat || systemPrompts[this.promptLanguage] || systemPrompts.en || "";
 
         try {
-            let response;
-            
-            if (this.backendType === 'vllm') {
-                // vLLM uses OpenAI-compatible API
-                const recentMessages = this.chatHistory
-                    .filter(m => m.type === 'chat')
-                    .map(m => {
-                        // Handle multimodal messages
-                        if (m.images && m.images.length > 0) {
-                            const content = [{ type: 'text', text: m.content }];
-                            m.images.forEach(img => {
-                                content.push({ type: 'image_url', image_url: { url: img } });
-                            });
-                            return { role: m.role, content };
-                        }
-                        return { role: m.role, content: m.content };
-                    });
-                const maxContext = Math.max(0, (this.config.ui && this.config.ui.maxChatHistory) ? this.config.ui.maxChatHistory : 50);
-                const limited = recentMessages.slice(-maxContext);
-                
-                // Build current message content (with images if provided)
-                let currentMessageContent;
-                if (images && images.length > 0) {
-                    currentMessageContent = [{ type: 'text', text: message }];
-                    images.forEach(img => {
-                        currentMessageContent.push({ type: 'image_url', image_url: { url: img } });
-                    });
-                } else {
-                    currentMessageContent = message;
-                }
-                
-                const messages = [
-                    { role: 'system', content: systemPrompt },
-                    ...limited,
-                    { role: 'user', content: currentMessageContent }
-                ];
-
-                response = await fetch(this.apiEndpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model: this.model,
-                        messages,
-                        stream: !!onStreamChunk,
-                        temperature: 0.7,
-                        max_tokens: 2048,
-                        // Disable reasoning/thinking mode
-                        include_reasoning: false,
-                        reasoning_effort: null
-                    })
+            const recentMessages = this.chatHistory
+                .filter(m => m.type === 'chat')
+                .map(m => {
+                    if (m.images && m.images.length > 0) {
+                        const content = [{ type: 'text', text: m.content }];
+                        m.images.forEach(img => content.push({ type: 'image_url', image_url: { url: img } }));
+                        return { role: m.role, content };
+                    }
+                    return { role: m.role, content: m.content };
                 });
+            const maxContext = Math.max(0, this.config.ui?.maxChatHistory || 50);
+            const limited = recentMessages.slice(-maxContext);
+
+            let currentMessageContent;
+            if (images && images.length > 0) {
+                currentMessageContent = [{ type: 'text', text: message }];
+                images.forEach(img => currentMessageContent.push({ type: 'image_url', image_url: { url: img } }));
             } else {
-                // Ollama backend
-                // Detect Ollama endpoints
-                const isOllamaApi = this.apiEndpoint.includes('/api/generate') || this.apiEndpoint.includes('/api/chat');
-                const chatEndpoint = this.apiEndpoint.includes('/api/chat')
-                    ? this.apiEndpoint
-                    : (this.apiEndpoint.includes('/api/generate')
-                        ? this.apiEndpoint.replace('/generate', '/chat')
-                        : this.apiEndpoint);
-                const generateEndpoint = this.apiEndpoint.includes('/api/generate')
-                    ? this.apiEndpoint
-                    : (this.apiEndpoint.includes('/api/chat')
-                        ? this.apiEndpoint.replace('/chat', '/generate')
-                        : this.apiEndpoint);
-
-                if (isOllamaApi) {
-                    // Build messages from chat history (limit for context)
-                    const recentMessages = this.chatHistory
-                        .filter(m => m.type === 'chat')
-                        .map(m => {
-                            // Handle multimodal messages for Ollama
-                            if (m.images && m.images.length > 0) {
-                                return { 
-                                    role: m.role, 
-                                    content: m.content,
-                                    images: m.images.map(img => img.split(',')[1]) // Extract base64 part
-                                };
-                            }
-                            return { role: m.role, content: m.content };
-                        });
-                    const maxContext = Math.max(0, (this.config.ui && this.config.ui.maxChatHistory) ? this.config.ui.maxChatHistory : 50);
-                    const limited = recentMessages.slice(-maxContext);
-                    
-                    // Build current message (with images if provided)
-                    const currentMessage = { role: 'user', content: message };
-                    if (images && images.length > 0) {
-                        currentMessage.images = images.map(img => img.split(',')[1]); // Extract base64 part
-                    }
-                    
-                    const messages = [
-                        { role: 'system', content: systemPrompt },
-                        ...limited,
-                        currentMessage
-                    ];
-
-                    // Prefer /api/chat
-                    response = await fetch(chatEndpoint, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: this.model,
-                            messages,
-                            stream: !!onStreamChunk,
-                            think: false
-                        })
-                    });
-
-                    // Fallback to /api/generate if chat not available
-                    if (response.status === 404) {
-                        try { response.body?.cancel?.(); } catch (e) {}
-                        response = await fetch(generateEndpoint, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                model: this.model,
-                                system: systemPrompt,
-                                prompt: message,
-                                context: this.ollamaContext || undefined,
-                                stream: !!onStreamChunk,
-                                think: false
-                            })
-                        });
-                    }
-                } else {
-                    // Generic completion-style API
-                    response = await fetch(this.apiEndpoint, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: this.model,
-                            prompt: `${systemPrompt}\n\nUser: ${message}`,
-                            stream: !!onStreamChunk,
-                            think: false
-                        })
-                    });
-                }
+                currentMessageContent = message;
             }
+
+            const messages = [
+                { role: 'system', content: systemPrompt },
+                ...limited,
+                { role: 'user', content: currentMessageContent }
+            ];
+
+            const headers = { 'Content-Type': 'application/json' };
+            if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+
+            const response = await fetch(this.apiEndpoint, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    model: this.model,
+                    messages,
+                    stream: !!onStreamChunk,
+                    temperature: 0.7,
+                    max_tokens: 2048
+                })
+            });
 
             if (!response.ok) {
                 throw new Error(`API request failed: ${response.status}`);
             }
 
-            // Streaming
+            // Streaming (SSE)
             if (onStreamChunk && response.body) {
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder('utf-8');
                 let buffer = '';
                 let finalText = '';
-                let lastObj = null;
 
                 while (true) {
                     const { value, done } = await reader.read();
@@ -332,80 +167,31 @@ class AIChatManager {
                     for (const line of lines) {
                         const trimmed = line.trim();
                         if (!trimmed) continue;
-                        
-                        // Handle vLLM/OpenAI SSE format (data: {...})
-                        let jsonStr = trimmed;
-                        if (trimmed.startsWith('data: ')) {
-                            jsonStr = trimmed.substring(6);
-                            if (jsonStr === '[DONE]') continue;
-                        }
-                        
+                        let jsonStr = trimmed.startsWith('data: ') ? trimmed.substring(6) : trimmed;
+                        if (jsonStr === '[DONE]') continue;
                         let obj;
-                        try {
-                            obj = JSON.parse(jsonStr);
-                        } catch {
-                            continue;
-                        }
-                        lastObj = obj;
-                        
-                        // Extract content based on backend type
-                        let chunk = '';
-                        if (this.backendType === 'vllm') {
-                            // vLLM/OpenAI format: choices[0].delta.content
-                            chunk = (obj.choices && obj.choices[0] && obj.choices[0].delta && obj.choices[0].delta.content) || '';
-                        } else {
-                            // Ollama format: message.content or response
-                            chunk = (obj && obj.message && obj.message.content) || obj.response || '';
-                        }
-                        
-                        if (chunk) {
-                            finalText += chunk;
-                            onStreamChunk(chunk);
-                        }
+                        try { obj = JSON.parse(jsonStr); } catch { continue; }
+                        const chunk = obj.choices?.[0]?.delta?.content || '';
+                        if (chunk) { finalText += chunk; onStreamChunk(chunk); }
                     }
                 }
-                // Flush trailing buffer
                 if (buffer.trim()) {
                     let jsonStr = buffer.trim();
-                    if (jsonStr.startsWith('data: ')) {
-                        jsonStr = jsonStr.substring(6);
-                    }
+                    if (jsonStr.startsWith('data: ')) jsonStr = jsonStr.substring(6);
                     if (jsonStr !== '[DONE]') {
                         try {
                             const obj = JSON.parse(jsonStr);
-                            lastObj = obj;
-                            let chunk = '';
-                            if (this.backendType === 'vllm') {
-                                chunk = (obj.choices && obj.choices[0] && obj.choices[0].delta && obj.choices[0].delta.content) || '';
-                            } else {
-                                chunk = (obj && obj.message && obj.message.content) || obj.response || '';
-                            }
-                            if (chunk) {
-                                finalText += chunk;
-                                onStreamChunk(chunk);
-                            }
+                            const chunk = obj.choices?.[0]?.delta?.content || '';
+                            if (chunk) { finalText += chunk; onStreamChunk(chunk); }
                         } catch {}
                     }
-                }
-                // Save Ollama context if provided by /api/generate
-                if (this.backendType === 'ollama' && lastObj && Array.isArray(lastObj.context)) {
-                    this.saveOllamaContext(lastObj.context);
                 }
                 return finalText || 'No response received';
             }
 
             // Non-streaming
             const data = await response.json();
-            if (this.backendType === 'ollama' && data && Array.isArray(data.context)) {
-                this.saveOllamaContext(data.context);
-            }
-            
-            // Extract response based on backend type
-            if (this.backendType === 'vllm') {
-                return (data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || 'No response received';
-            } else {
-                return (data && data.message && data.message.content) || data.response || 'No response received';
-            }
+            return data?.choices?.[0]?.message?.content || 'No response received';
         } catch (error) {
             console.error('AI API Error:', error);
             return `Error: ${error.message}. Please check your AI service configuration.`;
@@ -540,6 +326,7 @@ app.registerExtension({
                 };
 
                 const headerButtons = document.createElement('div');
+                headerButtons.style.cssText = 'display: flex; align-items: center; gap: 2px;';
                 headerButtons.appendChild(settingsBtn);
                 headerButtons.appendChild(clearBtn);
 
@@ -1256,62 +1043,74 @@ app.registerExtension({
             overflow-y: auto;
         `;
 
+        const inputStyle = 'width: 100%; padding: 6px 8px; border: 1px solid #444; border-radius: 4px; background: #2a2a2a; color: #fff; box-sizing: border-box;';
+        const labelStyle = 'display: block; margin-bottom: 4px; font-size: 12px; font-weight: 500; color: #ccc;';
+        const hintStyle = 'font-size: 11px; opacity: 0.6; margin-top: 4px;';
+        const rowStyle = 'margin-bottom: 14px;';
+
         dialog.innerHTML = `
-            <h3 style="margin-top: 0;">Настройки ассистента</h3>
-            <div style="margin-bottom: 12px;">
-                <label style="display: block; margin-bottom: 4px; font-size: 13px;">Тип бэкенда:</label>
-                <select id="ai-backend-type" style="width: 100%; padding: 6px; border: 1px solid #444; border-radius: 4px; background: #333; color: #fff;">
-                    <option value="ollama" ${chatManager.backendType === 'ollama' ? 'selected' : ''}>Ollama</option>
-                    <option value="vllm" ${chatManager.backendType === 'vllm' ? 'selected' : ''}>vLLM</option>
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 14px;">Настройки</h3>
+
+            <div style="${rowStyle}">
+                <label style="${labelStyle}">Быстрые настройки:</label>
+                <select id="ai-preset" style="${inputStyle}">
+                    <option value="">— выбрать пресет —</option>
+                    <option value="vllm">vLLM (localhost:8000)</option>
+                    <option value="lmstudio">LM Studio (localhost:1234)</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="openai">OpenAI</option>
                 </select>
-                <div style="font-size: 11px; opacity: 0.7; margin-top: 4px;">Выберите тип сервера для генерации</div>
             </div>
-            <div style="margin-bottom: 12px;">
-                <label style="display: block; margin-bottom: 4px; font-size: 13px;">Язык промпта:</label>
-                <select id="ai-prompt-language" style="width: 100%; padding: 6px; border: 1px solid #444; border-radius: 4px; background: #333; color: #fff;">
-                    <option value="en" ${chatManager.promptLanguage === 'en' ? 'selected' : ''}>English (Английский)</option>
-                    <option value="ru" ${chatManager.promptLanguage === 'ru' ? 'selected' : ''}>Russian (Русский)</option>
+
+            <div style="${rowStyle}">
+                <label style="${labelStyle}">API Endpoint <span style="opacity:0.5">(OpenAI-compatible)</span>:</label>
+                <input type="text" id="ai-api-endpoint" value="${chatManager.apiEndpoint}" style="${inputStyle}">
+                <div style="${hintStyle}">Примеры: http://localhost:8000/v1/chat/completions · https://openrouter.ai/api/v1/chat/completions</div>
+            </div>
+
+            <div style="${rowStyle}">
+                <label style="${labelStyle}">API Key <span style="opacity:0.5">(необязательно)</span>:</label>
+                <input type="password" id="ai-api-key" value="${chatManager.apiKey || ''}" style="${inputStyle}" placeholder="sk-...">
+                <div style="${hintStyle}">Обязателен для OpenRouter, OpenAI и других облачных сервисов</div>
+            </div>
+
+            <div style="${rowStyle}">
+                <label style="${labelStyle}">Модель:</label>
+                <input type="text" id="ai-model" value="${chatManager.model}" style="${inputStyle}">
+                <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
+                    <button id="ai-fetch-models" style="padding: 5px 10px; background: #444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Загрузить модели</button>
+                    <select id="ai-model-select" style="flex: 1; ${inputStyle}">
+                        <option value="">— выбрать из списка —</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="${rowStyle}">
+                <label style="${labelStyle}">Язык системного промпта:</label>
+                <select id="ai-prompt-language" style="${inputStyle}">
+                    <option value="en" ${chatManager.promptLanguage === 'en' ? 'selected' : ''}>English</option>
+                    <option value="ru" ${chatManager.promptLanguage === 'ru' ? 'selected' : ''}>Русский</option>
                 </select>
-                <div style="font-size: 11px; opacity: 0.7; margin-top: 4px;">Выберите язык для системного промпта</div>
             </div>
-            <div style="margin-bottom: 12px;">
-                <label style="display: block; margin-bottom: 4px; font-size: 13px;">Размер шрифта:</label>
-                <input type="range" id="ai-font-size" min="10" max="20" value="${chatManager.config.ui?.fontSize || 13}" 
-                       style="width: 100%;">
-                <div style="display: flex; justify-content: space-between; font-size: 11px; opacity: 0.7; margin-top: 4px;">
+
+            <div style="${rowStyle}">
+                <label style="${labelStyle}">Размер шрифта:</label>
+                <input type="range" id="ai-font-size" min="10" max="20" value="${chatManager.config.ui?.fontSize || 13}" style="width: 100%;">
+                <div style="display: flex; justify-content: space-between; ${hintStyle}">
                     <span>10px</span>
                     <span id="ai-font-size-value">${chatManager.config.ui?.fontSize || 13}px</span>
                     <span>20px</span>
                 </div>
             </div>
-            <div style="margin-bottom: 12px;">
-                <label style="display: block; margin-bottom: 4px; font-size: 13px;">API Endpoint:</label>
-                <input type="text" id="ai-api-endpoint" value="${chatManager.apiEndpoint}" 
-                       style="width: 100%; padding: 6px; border: 1px solid #444; border-radius: 4px; background: #333; color: #fff;">
-                <div style="font-size: 11px; opacity: 0.7; margin-top: 4px;" id="endpoint-hint">
-                    Ollama: http://localhost:11434/api/generate<br>
-                    vLLM: http://localhost:8000/v1/chat/completions
-                </div>
+
+            <div style="${rowStyle}">
+                <label style="${labelStyle}">Системный промпт:</label>
+                <textarea id="ai-system-prompt" style="width: 100%; min-height: 120px; padding: 8px; border: 1px solid #444; border-radius: 4px; background: #2a2a2a; color: #fff; font-size: 12px; resize: vertical; font-family: inherit; box-sizing: border-box; line-height: 1.4;" placeholder="Введите системный промпт..."></textarea>
             </div>
-            <div style="margin-bottom: 16px;">
-                <label style="display: block; margin-bottom: 4px; font-size: 13px;">Модель:</label>
-                <input type="text" id="ai-model" value="${chatManager.model}" 
-                       style="width: 100%; padding: 6px; border: 1px solid #444; border-radius: 4px; background: #333; color: #fff;">
-                <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px;">
-                    <button id="ai-fetch-models" style="padding: 6px 12px; background: #555; color: white; border: none; border-radius: 4px; cursor: pointer;">Обновить список моделей</button>
-                    <select id="ai-model-select" style="flex: 1; padding: 6px; border: 1px solid #444; border-radius: 4px; background: #333; color: #fff;">
-                        <option value="">— выбрать локальную модель —</option>
-                    </select>
-                </div>
-            </div>
-            <div style="margin-bottom: 16px;">
-                <label style="display: block; margin-bottom: 4px; font-size: 13px;">Системный промпт:</label>
-                <textarea id="ai-system-prompt" style="width: 100%; min-height: 120px; padding: 8px; border: 1px solid #444; border-radius: 4px; background: #333; color: #fff; font-size: 13px; resize: vertical; font-family: inherit; box-sizing: border-box;" placeholder="Введите системный промпт..."></textarea>
-                <div style="font-size: 11px; opacity: 0.7; margin-top: 4px;">Рекомендуется: вывод только финального промпта на английском</div>
-            </div>
-            <div style="text-align: right;">
-                <button id="ai-settings-cancel" style="margin-right: 8px; padding: 6px 12px; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer;">Отмена</button>
-                <button id="ai-settings-save" style="padding: 6px 12px; background: #007acc; color: white; border: none; border-radius: 4px; cursor: pointer;">Сохранить</button>
+
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px;">
+                <button id="ai-settings-cancel" style="padding: 7px 14px; background: #444; color: white; border: none; border-radius: 4px; cursor: pointer;">Отмена</button>
+                <button id="ai-settings-save" style="padding: 7px 14px; background: #007acc; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Сохранить</button>
             </div>
         `;
 
@@ -1330,81 +1129,58 @@ app.registerExtension({
         document.body.appendChild(backdrop);
         document.body.appendChild(dialog);
 
-        // Handle buttons
-        dialog.querySelector('#ai-settings-cancel').onclick = () => {
+        const closeDialog = () => {
             document.body.removeChild(backdrop);
             document.body.removeChild(dialog);
         };
 
-        // Hook up model fetching and selection
-        const backendTypeSelect = dialog.querySelector('#ai-backend-type');
-        const endpointInput = dialog.querySelector('#ai-api-endpoint');
-        const fetchBtn = dialog.querySelector('#ai-fetch-models');
-        const modelSelect = dialog.querySelector('#ai-model-select');
-        const modelInput = dialog.querySelector('#ai-model');
-        const systemPromptTextarea = dialog.querySelector('#ai-system-prompt');
-        const languageSelect = dialog.querySelector('#ai-prompt-language');
-        const fontSizeSlider = dialog.querySelector('#ai-font-size');
-        const fontSizeValue = dialog.querySelector('#ai-font-size-value');
-        
-        // Handle font size slider
-        fontSizeSlider.oninput = (e) => {
-            fontSizeValue.textContent = e.target.value + 'px';
+        dialog.querySelector('#ai-settings-cancel').onclick = closeDialog;
+        backdrop.onclick = closeDialog;
+
+        const presetSelect    = dialog.querySelector('#ai-preset');
+        const endpointInput   = dialog.querySelector('#ai-api-endpoint');
+        const apiKeyInput     = dialog.querySelector('#ai-api-key');
+        const fetchBtn        = dialog.querySelector('#ai-fetch-models');
+        const modelSelect     = dialog.querySelector('#ai-model-select');
+        const modelInput      = dialog.querySelector('#ai-model');
+        const systemPromptTA  = dialog.querySelector('#ai-system-prompt');
+        const languageSelect  = dialog.querySelector('#ai-prompt-language');
+        const fontSizeSlider  = dialog.querySelector('#ai-font-size');
+        const fontSizeValue   = dialog.querySelector('#ai-font-size-value');
+
+        // Prefill system prompt for current language
+        const fillSystemPrompt = (lang) => {
+            const prompts = chatManager.config.systemPrompts || {};
+            systemPromptTA.value = prompts[lang] || chatManager.config.chat?.systemPrompt?.chat || '';
         };
-        
-        // Handle language change - update system prompt preview
-        languageSelect.onchange = () => {
-            const lang = languageSelect.value;
-            const systemPrompts = chatManager.config.systemPrompts || chatManager.config.chat?.systemPrompts || {};
-            if (systemPrompts[lang]) {
-                systemPromptTextarea.value = systemPrompts[lang];
-            }
-        };
-        
-        // Handle backend type change
-        backendTypeSelect.onchange = () => {
-            const backend = backendTypeSelect.value;
-            const config = chatManager.config.alternatives[backend];
-            if (config) {
-                endpointInput.value = config.endpoint;
-                modelInput.value = config.model;
+        fillSystemPrompt(chatManager.promptLanguage || 'en');
+
+        fontSizeSlider.oninput = (e) => { fontSizeValue.textContent = e.target.value + 'px'; };
+
+        languageSelect.onchange = () => fillSystemPrompt(languageSelect.value);
+
+        // Preset fills endpoint + model
+        presetSelect.onchange = () => {
+            const key = presetSelect.value;
+            const presets = chatManager.config.presets || {};
+            if (key && presets[key]) {
+                endpointInput.value = presets[key].endpoint;
+                if (presets[key].model) modelInput.value = presets[key].model;
             }
         };
 
-        // Prefill system prompt based on current language
-        try {
-            const currentLang = chatManager.promptLanguage || 'en';
-            const systemPrompts = chatManager.config.systemPrompts || chatManager.config.chat?.systemPrompts || {};
-            if (systemPrompts[currentLang]) {
-                systemPromptTextarea.value = systemPrompts[currentLang];
-            } else {
-                systemPromptTextarea.value = (chatManager.config?.chat?.systemPrompt?.chat) || '';
-            }
-        } catch (e) {
-            systemPromptTextarea.value = '';
-        }
-
+        // Fetch models using current dialog values
         const populateModels = async () => {
             fetchBtn.disabled = true;
-            const original = fetchBtn.textContent;
-            fetchBtn.textContent = 'Загрузка...';
-            
-            // Temporarily set the backend type to fetch from the correct source
-            const originalBackendType = chatManager.backendType;
-            const selectedBackendType = backendTypeSelect.value;
-            chatManager.backendType = selectedBackendType;
-            
-            // Also temporarily update the endpoint to fetch from the right place
-            const originalEndpoint = chatManager.apiEndpoint;
+            fetchBtn.textContent = 'Загрузка…';
+            const savedEndpoint = chatManager.apiEndpoint;
+            const savedKey = chatManager.apiKey;
             chatManager.apiEndpoint = endpointInput.value;
-            
+            chatManager.apiKey = apiKeyInput.value;
             const names = await chatManager.fetchLocalModels();
-            
-            // Restore original values (will be saved only if user clicks Save)
-            chatManager.backendType = originalBackendType;
-            chatManager.apiEndpoint = originalEndpoint;
-            
-            modelSelect.innerHTML = '<option value="">— выбрать локальную модель —</option>';
+            chatManager.apiEndpoint = savedEndpoint;
+            chatManager.apiKey = savedKey;
+            modelSelect.innerHTML = '<option value="">— выбрать из списка —</option>';
             names.forEach(n => {
                 const opt = document.createElement('option');
                 opt.value = n;
@@ -1412,70 +1188,48 @@ app.registerExtension({
                 if (n === modelInput.value) opt.selected = true;
                 modelSelect.appendChild(opt);
             });
-            fetchBtn.textContent = original;
+            fetchBtn.textContent = 'Загрузить модели';
             fetchBtn.disabled = false;
         };
 
-        fetchBtn.onclick = () => { populateModels(); };
-        modelSelect.onchange = () => {
-            const val = modelSelect.value;
-            if (val) modelInput.value = val;
-        };
+        fetchBtn.onclick = populateModels;
+        modelSelect.onchange = () => { if (modelSelect.value) modelInput.value = modelSelect.value; };
 
         dialog.querySelector('#ai-settings-save').onclick = () => {
-            chatManager.backendType = dialog.querySelector('#ai-backend-type').value;
-            chatManager.apiEndpoint = dialog.querySelector('#ai-api-endpoint').value;
-            chatManager.model = dialog.querySelector('#ai-model').value;
-            const newSystemPrompt = systemPromptTextarea.value;
-            const newLanguage = languageSelect.value;
-            const newFontSize = parseInt(fontSizeSlider.value, 10);
+            const newEndpoint     = endpointInput.value.trim();
+            const newApiKey       = apiKeyInput.value.trim();
+            const newModel        = modelInput.value.trim();
+            const newLanguage     = languageSelect.value;
+            const newSystemPrompt = systemPromptTA.value;
+            const newFontSize     = parseInt(fontSizeSlider.value, 10);
 
-            // Persist via config storage
+            chatManager.apiEndpoint   = newEndpoint;
+            chatManager.apiKey        = newApiKey;
+            chatManager.model         = newModel;
+            chatManager.promptLanguage = newLanguage;
+
             const current = loadConfig();
-            
-            // Update system prompt for the selected language
-            const existingSystemPrompts = current.systemPrompts || current.chat?.systemPrompts || {};
-            const systemPrompts = {
-                ...existingSystemPrompts,
-                [newLanguage]: newSystemPrompt
-            };
-            
+            const systemPrompts = { ...(current.systemPrompts || {}), [newLanguage]: newSystemPrompt };
+
             const updated = {
                 ...current,
-                backendType: chatManager.backendType,
-                apiEndpoint: chatManager.apiEndpoint,
-                model: chatManager.model,
+                apiEndpoint: newEndpoint,
+                apiKey: newApiKey,
+                model: newModel,
                 promptLanguage: newLanguage,
-                ui: {
-                    ...(current.ui || {}),
-                    fontSize: newFontSize
-                },
+                ui: { ...(current.ui || {}), fontSize: newFontSize },
                 chat: {
                     ...(current.chat || {}),
-                    systemPrompt: {
-                        ...((current.chat && current.chat.systemPrompt) || {}),
-                        chat: newSystemPrompt !== undefined ? newSystemPrompt : ((current.chat && current.chat.systemPrompt && current.chat.systemPrompt.chat) || '')
-                    }
+                    systemPrompt: { ...((current.chat?.systemPrompt) || {}), chat: newSystemPrompt }
                 },
-                systemPrompts: systemPrompts
+                systemPrompts
             };
             saveConfig(updated);
             chatManager.config = updated;
-            chatManager.promptLanguage = newLanguage;
             chatManager.updateSystemPrompt();
 
-            document.body.removeChild(backdrop);
-            document.body.removeChild(dialog);
-            
-            // Re-render messages with new font size
-            if (this.messagesContainer) {
-                this.renderChatMessages(this.messagesContainer);
-            }
-        };
-
-        backdrop.onclick = () => {
-            document.body.removeChild(backdrop);
-            document.body.removeChild(dialog);
+            closeDialog();
+            if (this.messagesContainer) this.renderChatMessages(this.messagesContainer);
         };
     }
 });
