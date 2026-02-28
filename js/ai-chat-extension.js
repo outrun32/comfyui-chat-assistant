@@ -3,10 +3,10 @@ import { api } from "../../scripts/api.js";
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from "./config.js";
 
 /**
- * Ассистент промптов — ComfyUI Extension
+ * Ассистент — ComfyUI Extension
  * 
- * Простой помощник, который преобразует сложные описания/ТЗ в чистый,
- * понятный ИИ генерации промпт. На выходе — только финальный промпт.
+ * Помощник для составления промптов: преобразует описания и ТЗ в чёткий,
+ * готовый к генерации промпт. На выходе — только финальный промпт.
  */
 
 class AIChatManager {
@@ -440,8 +440,8 @@ app.registerExtension({
         app.extensionManager.registerSidebarTab({
             id: "numismaticAssistant",
             icon: "pi pi-comments",
-            title: "Ассистент промптов",
-            tooltip: "Ассистент промптов",
+            title: "Ассистент",
+            tooltip: "Ассистент",
             type: "custom",
             render: (el) => {
                 // Clear any existing content
@@ -491,7 +491,7 @@ app.registerExtension({
                 `;
 
                 const title = document.createElement('h3');
-                title.textContent = 'Ассистент промптов';
+                title.textContent = 'Ассистент';
                 title.style.cssText = `
                     margin: 0;
                     color: var(--text-color, #fff);
@@ -501,30 +501,36 @@ app.registerExtension({
 
                 // Settings button
                 const settingsBtn = document.createElement('button');
-                settingsBtn.innerHTML = '⚙️';
+                settingsBtn.innerHTML = '<i class="pi pi-cog"></i>';
                 settingsBtn.title = 'Настройки';
                 settingsBtn.style.cssText = `
                     background: none;
                     border: none;
                     cursor: pointer;
-                    font-size: 16px;
-                    padding: 4px;
-                    border-radius: 3px;
+                    font-size: 15px;
+                    padding: 5px;
+                    border-radius: 4px;
+                    color: var(--text-color, #ccc);
+                    display: flex;
+                    align-items: center;
                 `;
                 settingsBtn.onclick = () => this.showSettings();
 
                 // Clear chat button
                 const clearBtn = document.createElement('button');
-                clearBtn.innerHTML = '🗑️';
+                clearBtn.innerHTML = '<i class="pi pi-trash"></i>';
                 clearBtn.title = 'Очистить диалог';
                 clearBtn.style.cssText = `
                     background: none;
                     border: none;
                     cursor: pointer;
-                    font-size: 16px;
-                    padding: 4px;
-                    border-radius: 3px;
-                    margin-left: 8px;
+                    font-size: 15px;
+                    padding: 5px;
+                    border-radius: 4px;
+                    margin-left: 4px;
+                    color: var(--text-color, #ccc);
+                    display: flex;
+                    align-items: center;
                 `;
                 clearBtn.onclick = () => {
                     if (confirm('Очистить всю историю диалогов?')) {
@@ -581,20 +587,32 @@ app.registerExtension({
 
                 // Chat input
                 const chatInput = document.createElement('textarea');
-                chatInput.placeholder = 'Вставьте ТЗ/описание или прикрепите изображение — на выходе будет только готовый промпт для генерации';
+                chatInput.placeholder = 'Опишите задачу или вставьте ТЗ… (Shift+Enter — новая строка)';
                 chatInput.style.cssText = `
                     width: 100%;
-                    min-height: 80px;
+                    min-height: 72px;
+                    max-height: 200px;
                     padding: 10px;
                     border: 1px solid var(--border-color, #444);
                     border-radius: 6px;
                     background: var(--input-bg, #333);
                     color: var(--text-color, #fff);
                     font-size: 13px;
-                    resize: vertical;
+                    resize: none;
                     font-family: inherit;
                     box-sizing: border-box;
+                    line-height: 1.5;
+                    overflow-y: hidden;
                 `;
+
+                // Auto-resize textarea as user types
+                const autoResize = () => {
+                    chatInput.style.height = 'auto';
+                    const newH = Math.min(chatInput.scrollHeight, 200);
+                    chatInput.style.height = newH + 'px';
+                    chatInput.style.overflowY = chatInput.scrollHeight > 200 ? 'auto' : 'hidden';
+                };
+                chatInput.addEventListener('input', autoResize);
 
                 // Hidden file input
                 const fileInput = document.createElement('input');
@@ -667,23 +685,28 @@ app.registerExtension({
 
                 // Image button
                 const imageBtn = document.createElement('button');
-                imageBtn.innerHTML = '🖼️';
+                imageBtn.innerHTML = '<i class="pi pi-image"></i>';
                 imageBtn.title = 'Прикрепить изображение';
                 imageBtn.style.cssText = `
-                    padding: 8px 12px;
+                    padding: 0 12px;
                     background: var(--bg-color-dark, #383838);
-                    color: var(--text-color, #fff);
+                    color: var(--text-color, #ccc);
                     border: 1px solid var(--border-color, #444);
                     border-radius: 4px;
                     cursor: pointer;
-                    font-size: 16px;
+                    font-size: 15px;
                     margin-right: 8px;
+                    display: flex;
+                    align-items: center;
+                    height: 36px;
+                    flex-shrink: 0;
                 `;
                 imageBtn.onclick = () => fileInput.click();
 
                 const sendBtn = document.createElement('button');
                 sendBtn.textContent = 'Отправить';
                 sendBtn.style.cssText = `
+                    flex: 1;
                     padding: 8px 16px;
                     background: var(--accent-color, #007acc);
                     color: white;
@@ -692,6 +715,7 @@ app.registerExtension({
                     cursor: pointer;
                     font-size: 13px;
                     font-weight: 500;
+                    height: 36px;
                 `;
 
                 sendBtn.onclick = async () => {
@@ -790,10 +814,10 @@ app.registerExtension({
             `;
             welcome.innerHTML = `
                 <div style="font-size: 24px; margin-bottom: 12px;">🏛️</div>
-                <div>Добро пожаловать в Ассистент промптов!</div>
+                <div>Ассистент промптов</div>
                 <div style="font-size: 12px; margin-top: 8px;">
-                    Вставьте описание или прикрепите изображение 🖼️<br>
-                    Ассистент вернёт только финальный промпт.
+                    Опишите задачу или прикрепите изображение 🖼️<br>
+                    На выходе — только готовый промпт для генерации.
                 </div>
             `;
             container.appendChild(welcome);
@@ -821,9 +845,8 @@ app.registerExtension({
                 margin-bottom: 6px;
                 font-weight: 500;
             `;
-            
-            const roleText = isUser ? 'Пользователь' : 'Ассистент';
-            header.textContent = roleText;
+            header.textContent = isUser ? 'Вы' : 'Ассистент';
+            messageEl.appendChild(header);
 
             // Add images if present
             if (message.images && message.images.length > 0) {
@@ -844,84 +867,75 @@ app.registerExtension({
                         cursor: pointer;
                         object-fit: contain;
                     `;
-                    img.onclick = () => {
-                        // Open image in new tab on click
-                        window.open(imgData, '_blank');
-                    };
+                    img.onclick = () => window.open(imgData, '_blank');
                     imagesContainer.appendChild(img);
                 });
-                messageEl.appendChild(header);
                 messageEl.appendChild(imagesContainer);
-            } else {
-                messageEl.appendChild(header);
             }
 
             const fontSize = chatManager.config.ui?.fontSize || 13;
-            const content = document.createElement('div');
-            content.style.cssText = `
-                line-height: 1.4;
-                font-size: ${fontSize}px;
-                word-wrap: break-word;
-                white-space: pre-wrap;
-            `;
-            content.textContent = message.content;
 
-            // Add buttons for AI responses
-            if (!isUser) {
-                const buttonContainer = document.createElement('div');
-                buttonContainer.style.cssText = `
-                    float: right;
-                    display: flex;
-                    gap: 4px;
+            // Typing indicator while streaming (empty assistant message)
+            if (!isUser && message.content === '') {
+                const typingIndicator = document.createElement('div');
+                typingIndicator.className = 'typing-indicator';
+                typingIndicator.innerHTML = '<span></span><span></span><span></span>';
+                messageEl.appendChild(typingIndicator);
+            } else {
+                const content = document.createElement('div');
+                content.style.cssText = `
+                    line-height: 1.5;
+                    font-size: ${fontSize}px;
+                    word-wrap: break-word;
+                    white-space: pre-wrap;
                 `;
-                
-                // Copy button
+                content.textContent = message.content;
+                messageEl.appendChild(content);
+            }
+
+            // Action buttons for assistant messages (visible on hover via CSS)
+            if (!isUser) {
+                const messageActions = document.createElement('div');
+                messageActions.className = 'message-actions';
+
                 const copyBtn = document.createElement('button');
-                copyBtn.innerHTML = '📋';
-                copyBtn.title = 'Копировать в буфер обмена';
+                copyBtn.innerHTML = '<i class="pi pi-copy"></i>';
+                copyBtn.title = 'Копировать';
                 copyBtn.style.cssText = `
                     background: none;
                     border: none;
                     cursor: pointer;
-                    font-size: 14px;
-                    padding: 2px 4px;
+                    font-size: 13px;
+                    padding: 3px 7px;
                     border-radius: 3px;
-                    opacity: 0.6;
+                    color: var(--text-color, #ccc);
                 `;
                 copyBtn.onclick = () => {
                     navigator.clipboard.writeText(message.content).then(() => {
-                        copyBtn.innerHTML = '✅';
-                        setTimeout(() => copyBtn.innerHTML = '📋', 1000);
+                        copyBtn.innerHTML = '<i class="pi pi-check"></i>';
+                        setTimeout(() => copyBtn.innerHTML = '<i class="pi pi-copy"></i>', 1500);
                     });
                 };
-                
-                // Send to node button
+
                 const sendToNodeBtn = document.createElement('button');
-                sendToNodeBtn.innerHTML = '📤';
+                sendToNodeBtn.innerHTML = '<i class="pi pi-send"></i>';
                 sendToNodeBtn.title = 'Отправить в узел промпта';
                 sendToNodeBtn.style.cssText = `
                     background: none;
                     border: none;
                     cursor: pointer;
-                    font-size: 14px;
-                    padding: 2px 4px;
+                    font-size: 13px;
+                    padding: 3px 7px;
                     border-radius: 3px;
-                    opacity: 0.6;
+                    color: var(--text-color, #ccc);
                 `;
-                sendToNodeBtn.onclick = () => {
-                    this.sendToPromptNode(message.content);
-                };
-                
-                buttonContainer.appendChild(copyBtn);
-                buttonContainer.appendChild(sendToNodeBtn);
-                header.appendChild(buttonContainer);
+                sendToNodeBtn.onclick = () => this.sendToPromptNode(message.content);
+
+                messageActions.appendChild(copyBtn);
+                messageActions.appendChild(sendToNodeBtn);
+                messageEl.appendChild(messageActions);
             }
 
-            // Only append header if it wasn't already appended (in the image block)
-            if (!message.images || message.images.length === 0) {
-                messageEl.appendChild(header);
-            }
-            messageEl.appendChild(content);
             container.appendChild(messageEl);
         });
 
@@ -1223,6 +1237,7 @@ app.registerExtension({
     showSettings() {
         // Create a simple settings dialog
         const dialog = document.createElement('div');
+        dialog.className = 'ai-settings-dialog';
         dialog.style.cssText = `
             position: fixed;
             top: 50%;
@@ -1234,7 +1249,11 @@ app.registerExtension({
             padding: 20px;
             z-index: 10000;
             color: var(--text-color, #fff);
-            min-width: 300px;
+            min-width: 320px;
+            max-width: 480px;
+            width: 90vw;
+            max-height: 90vh;
+            overflow-y: auto;
         `;
 
         dialog.innerHTML = `
