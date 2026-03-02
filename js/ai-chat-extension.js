@@ -17,6 +17,7 @@ class AIChatManager {
         this.apiEndpoint = this.config.apiEndpoint;
         this.model = this.config.model;
         this.apiKey = this.config.apiKey || '';
+        this.temperature = this.config.temperature ?? 0.7;
         this.promptLanguage = this.config.promptLanguage || 'en';
         this.updateSystemPrompt();
     }
@@ -142,7 +143,7 @@ class AIChatManager {
                     model: this.model,
                     messages,
                     stream: !!onStreamChunk,
-                    temperature: 0.7,
+                    temperature: this.temperature,
                     max_tokens: 2048,
                     // Disable reasoning/thinking for all compatible providers.
                     // `effort: "none"` fully disables it (OpenAI/Grok/compatible).
@@ -1100,6 +1101,16 @@ app.registerExtension({
             </div>
 
             <div style="${rowStyle}">
+                <label style="${labelStyle}">Температура:</label>
+                <input type="range" id="ai-temperature" min="0" max="2" step="0.05" value="${chatManager.temperature ?? 0.7}" style="width: 100%;">
+                <div style="display: flex; justify-content: space-between; ${hintStyle}">
+                    <span>0 — точно</span>
+                    <span id="ai-temperature-value">${(chatManager.temperature ?? 0.7).toFixed(2)}</span>
+                    <span>2 — творчески</span>
+                </div>
+            </div>
+
+            <div style="${rowStyle}">
                 <label style="${labelStyle}">Размер шрифта:</label>
                 <input type="range" id="ai-font-size" min="10" max="20" value="${chatManager.config.ui?.fontSize || 13}" style="width: 100%;">
                 <div style="display: flex; justify-content: space-between; ${hintStyle}">
@@ -1151,8 +1162,12 @@ app.registerExtension({
         const modelInput      = dialog.querySelector('#ai-model');
         const systemPromptTA  = dialog.querySelector('#ai-system-prompt');
         const languageSelect  = dialog.querySelector('#ai-prompt-language');
+        const tempSlider      = dialog.querySelector('#ai-temperature');
+        const tempValue       = dialog.querySelector('#ai-temperature-value');
         const fontSizeSlider  = dialog.querySelector('#ai-font-size');
         const fontSizeValue   = dialog.querySelector('#ai-font-size-value');
+
+        tempSlider.oninput = (e) => { tempValue.textContent = parseFloat(e.target.value).toFixed(2); };
 
         // Prefill system prompt for current language
         const fillSystemPrompt = (lang) => {
@@ -1207,11 +1222,13 @@ app.registerExtension({
             const newModel        = modelInput.value.trim();
             const newLanguage     = languageSelect.value;
             const newSystemPrompt = systemPromptTA.value;
+            const newTemperature  = parseFloat(tempSlider.value);
             const newFontSize     = parseInt(fontSizeSlider.value, 10);
 
-            chatManager.apiEndpoint   = newEndpoint;
-            chatManager.apiKey        = newApiKey;
-            chatManager.model         = newModel;
+            chatManager.apiEndpoint    = newEndpoint;
+            chatManager.apiKey         = newApiKey;
+            chatManager.model          = newModel;
+            chatManager.temperature    = newTemperature;
             chatManager.promptLanguage = newLanguage;
 
             const current = loadConfig();
@@ -1222,6 +1239,7 @@ app.registerExtension({
                 apiEndpoint: newEndpoint,
                 apiKey: newApiKey,
                 model: newModel,
+                temperature: newTemperature,
                 promptLanguage: newLanguage,
                 ui: { ...(current.ui || {}), fontSize: newFontSize },
                 chat: {
