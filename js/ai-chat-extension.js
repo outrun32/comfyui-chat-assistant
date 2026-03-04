@@ -145,10 +145,11 @@ class AIChatManager {
                     stream: !!onStreamChunk,
                     temperature: this.temperature,
                     max_tokens: 2048,
-                    // Disable reasoning/thinking for all compatible providers.
-                    // `effort: "none"` fully disables it (OpenAI/Grok/compatible).
-                    // `exclude: true` hides it from response for models that still think internally.
-                    // `include_reasoning: false` is the legacy OpenRouter fallback.
+                    // Disable reasoning/thinking across all compatible providers:
+                    // SGLang (Qwen3 and others): chat_template_kwargs.enable_thinking = false
+                    // OpenRouter: reasoning.effort = "none" + exclude = true
+                    // Legacy OpenRouter fallback: include_reasoning = false
+                    chat_template_kwargs: { enable_thinking: false },
                     reasoning: { effort: "none", exclude: true },
                     include_reasoning: false
                 })
