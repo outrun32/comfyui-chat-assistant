@@ -4,16 +4,16 @@
 
 export const DEFAULT_CONFIG = {
     // AI Service Configuration (OpenAI-compatible endpoints only)
-    apiEndpoint: "http://localhost:8000/v1/chat/completions",
-    model: "meta-llama/Llama-3.2-3B-Instruct",
+    apiEndpoint: "http://10.1.202.20:8007/v1/chat/completions",
+    model: "Qwen/Qwen3.5-35B-A3B",
     apiKey: "", // Optional: required for OpenRouter, OpenAI, etc.
-    temperature: 0.7,
+    temperature: 0.0,
 
     // Quick-select presets (all OpenAI-compatible)
     presets: {
         vllm: {
-            endpoint: "http://localhost:8000/v1/chat/completions",
-            model: "meta-llama/Llama-3.2-3B-Instruct"
+            endpoint: "http://10.1.202.20:8007/v1/chat/completions",
+            model: "Qwen/Qwen3.5-35B-A3B"
         },
         lmstudio: {
             endpoint: "http://localhost:1234/v1/chat/completions",
