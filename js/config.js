@@ -66,6 +66,7 @@ export const DEFAULT_CONFIG = {
         apiEndpoint: 'prompt-assistant-endpoint',
         model: 'prompt-assistant-model',
         config: 'prompt-assistant-config',
+        apiKeySession: 'prompt-assistant-api-key-session',
         ollamaContext: 'prompt-assistant-ollama-context'
     }
 };
@@ -113,8 +114,36 @@ function loadLegacyConfig() {
     return legacy;
 }
 
+function loadSessionApiKey() {
+    try {
+        return sessionStorage.getItem(DEFAULT_CONFIG.storage.apiKeySession) || '';
+    } catch (e) {
+        console.warn('Failed to load session API key:', e);
+        return '';
+    }
+}
+
+function saveSessionApiKey(apiKey = '') {
+    try {
+        if (apiKey) {
+            sessionStorage.setItem(DEFAULT_CONFIG.storage.apiKeySession, apiKey);
+        } else {
+            sessionStorage.removeItem(DEFAULT_CONFIG.storage.apiKeySession);
+        }
+    } catch (e) {
+        console.warn('Failed to save session API key:', e);
+    }
+}
+
 export function normalizeConfig(config = {}) {
-    return deepMerge(deepMerge(DEFAULT_CONFIG, loadLegacyConfig()), config);
+    const normalized = deepMerge(deepMerge(DEFAULT_CONFIG, loadLegacyConfig()), config);
+    const sessionApiKey = loadSessionApiKey();
+
+    if (sessionApiKey) {
+        normalized.apiKey = sessionApiKey;
+    }
+
+    return normalized;
 }
 
 /**
@@ -124,7 +153,11 @@ export function loadConfig() {
     try {
         const saved = localStorage.getItem(DEFAULT_CONFIG.storage.config);
         if (saved) {
-            return normalizeConfig(JSON.parse(saved));
+            const parsed = JSON.parse(saved);
+            if (parsed.apiKey) {
+                saveSessionApiKey(parsed.apiKey);
+            }
+            return normalizeConfig(parsed);
         }
     } catch (e) {
         console.warn('Failed to load AI chat config:', e);
@@ -138,9 +171,12 @@ export function loadConfig() {
 export function saveConfig(config) {
     try {
         const normalized = normalizeConfig(config);
-        localStorage.setItem(DEFAULT_CONFIG.storage.config, JSON.stringify(normalized));
+        const { apiKey, ...persistedConfig } = normalized;
+
+        localStorage.setItem(DEFAULT_CONFIG.storage.config, JSON.stringify(persistedConfig));
         localStorage.setItem(DEFAULT_CONFIG.storage.apiEndpoint, normalized.apiEndpoint);
         localStorage.setItem(DEFAULT_CONFIG.storage.model, normalized.model);
+        saveSessionApiKey(apiKey);
         return true;
     } catch (e) {
         console.error('Failed to save AI chat config:', e);
@@ -156,6 +192,7 @@ export function resetConfig() {
         localStorage.removeItem(DEFAULT_CONFIG.storage.config);
         localStorage.removeItem(DEFAULT_CONFIG.storage.apiEndpoint);
         localStorage.removeItem(DEFAULT_CONFIG.storage.model);
+        sessionStorage.removeItem(DEFAULT_CONFIG.storage.apiKeySession);
         return true;
     } catch (e) {
         console.error('Failed to reset AI chat config:', e);

@@ -216,7 +216,7 @@ function loadCSS() {
     const linkId = 'comfyui-chat-assistant-styles';
 
     document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
-        if (link.id !== linkId && link.href && link.href.includes('/ai-chat-styles.css') && link.href !== href) {
+        if (link.id !== linkId && link.href && link.href.endsWith('/ai-chat-styles.css') && link.href !== href) {
             link.remove();
         }
     });
