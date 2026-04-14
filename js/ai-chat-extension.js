@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { DEFAULT_CONFIG, loadConfig, saveConfig } from "./config.js";
+import { DEFAULT_CONFIG, loadApiKey, loadConfig, saveApiKey, saveConfig } from "./config.js";
 
 /**
  * Ассистент — ComfyUI Extension
@@ -16,10 +16,15 @@ class AIChatManager {
         this.isExpanding = false;
         this.apiEndpoint = this.config.apiEndpoint;
         this.model = this.config.model;
-        this.apiKey = this.config.apiKey || '';
+        this.apiKey = '';
         this.temperature = this.config.temperature ?? 0.7;
         this.promptLanguage = this.config.promptLanguage || 'en';
         this.updateSystemPrompt();
+    }
+
+    async restoreApiKey() {
+        const apiKey = await loadApiKey();
+        this.apiKey = apiKey || '';
     }
     
     // Update system prompt based on selected language
@@ -209,14 +214,32 @@ class AIChatManager {
 
 // Global chat manager instance
 let chatManager;
+let didCleanupLegacyStyles = false;
 
 // Load CSS styles
 function loadCSS() {
-    const cssLink = document.createElement('link');
-    cssLink.rel = 'stylesheet';
-    cssLink.type = 'text/css';
-    cssLink.href = 'extensions/ai-chat-extension/ai-chat-styles.css';
-    document.head.appendChild(cssLink);
+    const href = new URL('./ai-chat-styles.css', import.meta.url).href;
+    const linkId = 'comfyui-chat-assistant-styles';
+
+    if (!didCleanupLegacyStyles) {
+        document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
+            if (link.id !== linkId && link.href && link.href.endsWith('/ai-chat-styles.css') && link.href !== href) {
+                link.remove();
+            }
+        });
+        didCleanupLegacyStyles = true;
+    }
+
+    let cssLink = document.getElementById(linkId);
+    if (!cssLink) {
+        cssLink = document.createElement('link');
+        cssLink.id = linkId;
+        cssLink.rel = 'stylesheet';
+        cssLink.type = 'text/css';
+        document.head.appendChild(cssLink);
+    }
+
+    cssLink.href = href;
 }
 
 // Register the extension
@@ -229,6 +252,7 @@ app.registerExtension({
         
         // Initialize chat manager
         chatManager = new AIChatManager();
+        await chatManager.restoreApiKey();
         
         // Register the sidebar tab
         app.extensionManager.registerSidebarTab({
@@ -1217,7 +1241,7 @@ app.registerExtension({
         fetchBtn.onclick = populateModels;
         modelSelect.onchange = () => { if (modelSelect.value) modelInput.value = modelSelect.value; };
 
-        dialog.querySelector('#ai-settings-save').onclick = () => {
+        dialog.querySelector('#ai-settings-save').onclick = async () => {
             const newEndpoint     = endpointInput.value.trim();
             const newApiKey       = apiKeyInput.value.trim();
             const newModel        = modelInput.value.trim();
@@ -1238,7 +1262,6 @@ app.registerExtension({
             const updated = {
                 ...current,
                 apiEndpoint: newEndpoint,
-                apiKey: newApiKey,
                 model: newModel,
                 temperature: newTemperature,
                 promptLanguage: newLanguage,
@@ -1250,6 +1273,7 @@ app.registerExtension({
                 systemPrompts
             };
             saveConfig(updated);
+            await saveApiKey(newApiKey);
             chatManager.config = updated;
             chatManager.updateSystemPrompt();
 
