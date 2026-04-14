@@ -212,11 +212,25 @@ let chatManager;
 
 // Load CSS styles
 function loadCSS() {
-    const cssLink = document.createElement('link');
-    cssLink.rel = 'stylesheet';
-    cssLink.type = 'text/css';
-    cssLink.href = 'extensions/ai-chat-extension/ai-chat-styles.css';
-    document.head.appendChild(cssLink);
+    const href = new URL('./ai-chat-styles.css', import.meta.url).href;
+    const linkId = 'comfyui-chat-assistant-styles';
+
+    document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
+        if (link.id !== linkId && link.href && link.href.includes('/ai-chat-styles.css') && link.href !== href) {
+            link.remove();
+        }
+    });
+
+    let cssLink = document.getElementById(linkId);
+    if (!cssLink) {
+        cssLink = document.createElement('link');
+        cssLink.id = linkId;
+        cssLink.rel = 'stylesheet';
+        cssLink.type = 'text/css';
+        document.head.appendChild(cssLink);
+    }
+
+    cssLink.href = href;
 }
 
 // Register the extension

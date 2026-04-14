@@ -70,6 +70,53 @@ export const DEFAULT_CONFIG = {
     }
 };
 
+function isPlainObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function deepMerge(base, override) {
+    if (!isPlainObject(base)) {
+        return override === undefined ? base : override;
+    }
+
+    const result = { ...base };
+    if (!isPlainObject(override)) {
+        return result;
+    }
+
+    for (const [key, value] of Object.entries(override)) {
+        if (value === undefined) continue;
+
+        if (isPlainObject(base[key]) && isPlainObject(value)) {
+            result[key] = deepMerge(base[key], value);
+        } else {
+            result[key] = value;
+        }
+    }
+
+    return result;
+}
+
+function loadLegacyConfig() {
+    const legacy = {};
+
+    try {
+        const apiEndpoint = localStorage.getItem(DEFAULT_CONFIG.storage.apiEndpoint);
+        const model = localStorage.getItem(DEFAULT_CONFIG.storage.model);
+
+        if (apiEndpoint) legacy.apiEndpoint = apiEndpoint;
+        if (model) legacy.model = model;
+    } catch (e) {
+        console.warn('Failed to load legacy AI chat config:', e);
+    }
+
+    return legacy;
+}
+
+export function normalizeConfig(config = {}) {
+    return deepMerge(deepMerge(DEFAULT_CONFIG, loadLegacyConfig()), config);
+}
+
 /**
  * Load configuration from localStorage with fallbacks
  */
@@ -77,12 +124,12 @@ export function loadConfig() {
     try {
         const saved = localStorage.getItem(DEFAULT_CONFIG.storage.config);
         if (saved) {
-            return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
+            return normalizeConfig(JSON.parse(saved));
         }
     } catch (e) {
         console.warn('Failed to load AI chat config:', e);
     }
-    return DEFAULT_CONFIG;
+    return normalizeConfig();
 }
 
 /**
@@ -90,7 +137,10 @@ export function loadConfig() {
  */
 export function saveConfig(config) {
     try {
-        localStorage.setItem(DEFAULT_CONFIG.storage.config, JSON.stringify(config));
+        const normalized = normalizeConfig(config);
+        localStorage.setItem(DEFAULT_CONFIG.storage.config, JSON.stringify(normalized));
+        localStorage.setItem(DEFAULT_CONFIG.storage.apiEndpoint, normalized.apiEndpoint);
+        localStorage.setItem(DEFAULT_CONFIG.storage.model, normalized.model);
         return true;
     } catch (e) {
         console.error('Failed to save AI chat config:', e);
@@ -104,6 +154,8 @@ export function saveConfig(config) {
 export function resetConfig() {
     try {
         localStorage.removeItem(DEFAULT_CONFIG.storage.config);
+        localStorage.removeItem(DEFAULT_CONFIG.storage.apiEndpoint);
+        localStorage.removeItem(DEFAULT_CONFIG.storage.model);
         return true;
     } catch (e) {
         console.error('Failed to reset AI chat config:', e);
