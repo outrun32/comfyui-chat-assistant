@@ -199,11 +199,7 @@ async function getEncryptionKey() {
 }
 
 function bytesToBase64(bytes) {
-    let binary = '';
-    bytes.forEach((byte) => {
-        binary += String.fromCharCode(byte);
-    });
-    return btoa(binary);
+    return btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''));
 }
 
 function base64ToBytes(base64) {

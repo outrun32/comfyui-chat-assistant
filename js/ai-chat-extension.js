@@ -16,7 +16,7 @@ class AIChatManager {
         this.isExpanding = false;
         this.apiEndpoint = this.config.apiEndpoint;
         this.model = this.config.model;
-        this.apiKey = this.config.apiKey || '';
+        this.apiKey = '';
         this.temperature = this.config.temperature ?? 0.7;
         this.promptLanguage = this.config.promptLanguage || 'en';
         this.updateSystemPrompt();
@@ -25,7 +25,6 @@ class AIChatManager {
     async restoreApiKey() {
         const apiKey = await loadApiKey();
         this.apiKey = apiKey || '';
-        this.config.apiKey = this.apiKey;
     }
     
     // Update system prompt based on selected language
@@ -222,17 +221,17 @@ function loadCSS() {
     const href = new URL('./ai-chat-styles.css', import.meta.url).href;
     const linkId = 'comfyui-chat-assistant-styles';
 
+    if (!didCleanupLegacyStyles) {
+        document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
+            if (link.id !== linkId && link.href && link.href.endsWith('/ai-chat-styles.css') && link.href !== href) {
+                link.remove();
+            }
+        });
+        didCleanupLegacyStyles = true;
+    }
+
     let cssLink = document.getElementById(linkId);
     if (!cssLink) {
-        if (!didCleanupLegacyStyles) {
-            document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
-                if (link.id !== linkId && link.href && link.href.endsWith('/ai-chat-styles.css') && link.href !== href) {
-                    link.remove();
-                }
-            });
-            didCleanupLegacyStyles = true;
-        }
-
         cssLink = document.createElement('link');
         cssLink.id = linkId;
         cssLink.rel = 'stylesheet';
@@ -1276,7 +1275,6 @@ app.registerExtension({
             saveConfig(updated);
             await saveApiKey(newApiKey);
             chatManager.config = updated;
-            chatManager.config.apiKey = newApiKey;
             chatManager.updateSystemPrompt();
 
             closeDialog();
